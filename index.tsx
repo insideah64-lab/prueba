@@ -2,8 +2,14 @@
 /** @jsxImportSource hono/jsx */
 import { Hono } from "hono";
 import { jsx } from "hono/jsx";
+import Groq from "groq-sdk";
 
 const app = new Hono();
+
+// Initialize Groq client
+const groq = new Groq({
+  apiKey: Bun.env.GROQ_API_KEY || "",
+});
 
 // Game state for single player
 interface GameState {
@@ -19,6 +25,7 @@ interface GameState {
   location: string;
   equipment: Record<string, string>;
   log: string[];
+  isAlive: boolean;
 }
 
 let gameState: GameState | null = null;
@@ -42,7 +49,39 @@ const initializeGame = (name: string): GameState => ({
     "Despiertas en la Taberna del Óxido. El mundo está cubierto por un velo de corrosión.",
     "Un barman te mira con desconfianza. ¿Qué haces aquí?",
   ],
+  isAlive: true,
 });
+
+// Generate AI narrative using Groq
+async function generateNarrative(prompt: string): Promise<string> {
+  if (!Bun.env.GROQ_API_KEY) {
+    return "La IA está descargando... Intenta más tarde.";
+  }
+
+  try {
+    const message = await groq.messages.create({
+      model: "mixtral-8x7b-32768",
+      max_tokens: 150,
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      system:
+        "Eres un narrador épico de un MUD gótico. Responde en español, con descripciones cortas (máximo 2 líneas), atmósfera oscura, y referencias al Óxido y la corrupción. Sé breve y directo.",
+    });
+
+    const content = message.content[0];
+    if (content.type === "text") {
+      return content.text.trim();
+    }
+  } catch (error) {
+    console.error("Groq error:", error);
+  }
+
+  return "El silencio envuelve el mundo...";
+}
 
 // ===== RUTAS =====
 app.get("/", (c) => {
@@ -87,6 +126,13 @@ app.get("/", (c) => {
           }
           .neon-text {
             text-shadow: 0 0 10px rgba(0, 208, 132, 0.8);
+          }
+          .loading {
+            animation: pulse 1s infinite;
+          }
+          @keyframes pulse {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
           }
         `}</style>
       </head>
@@ -263,8 +309,13 @@ app.get("/", (c) => {
 
             async function sendCommand() {
               const input = document.getElementById("commandInput");
+              const btn = document.getElementById("sendBtn");
               const cmd = input.value.trim();
               if (!cmd) return;
+
+              btn.disabled = true;
+              btn.classList.add("loading");
+              input.disabled = true;
 
               const res = await fetch("/api/command", {
                 method: "POST",
@@ -275,6 +326,10 @@ app.get("/", (c) => {
               updateUI(data);
               input.value = "";
               input.focus();
+              
+              btn.disabled = false;
+              btn.classList.remove("loading");
+              input.disabled = false;
             }
 
             function updateUI(state) {
@@ -311,6 +366,12 @@ app.get("/", (c) => {
 app.post("/api/init", async (c) => {
   const { name } = await c.req.json();
   gameState = initializeGame(name);
+  
+  // Generate welcome message using Groq
+  const welcomePrompt = `${name} llega a la Taberna del Óxido en Aethelraed. Es su primer día en este mundo maldito. El barman lo mira. ¿Qué ve el barman?`;
+  const welcomeMsg = await generateNarrative(welcomePrompt);
+  gameState.log.push(welcomeMsg);
+
   return c.json(gameState);
 });
 
@@ -320,28 +381,38 @@ app.post("/api/command", async (c) => {
     return c.json({ error: "Game not initialized" }, 400);
   }
 
+  if (!gameState.isAlive) {
+    return c.json({ error: "You are dead. Game over." }, 400);
+  }
+
   const { command } = await c.req.json();
   const cmd = command.toLowerCase().trim();
 
   // Process command
-  processCommand(cmd, gameState);
+  await processCommand(cmd, gameState);
 
   return c.json(gameState);
 });
 
-function processCommand(cmd: string, state: GameState) {
-  const responses: Record<string, () => void> = {
-    atacar: () => {
+async function processCommand(cmd: string, state: GameState) {
+  const responses: Record<string, () => Promise<void>> = {
+    atacar: async () => {
       const damage = Math.floor(Math.random() * 25) + 10;
       state.hp = Math.max(0, state.hp - damage);
       state.experience += 25;
-      state.log.push(`⚔️ Atacas ferozmente. Recibes ${damage} de daño.`);
+
+      const prompt = `Un ${state.playerClass} atacó ferozmente en el ${state.location}. Describe el resultado de su ataque en una línea gótica y épica.`;
+      const narration = await generateNarrative(prompt);
+      state.log.push(`⚔️ ${narration}`);
+      state.log.push(`💔 Recibes ${damage} de daño. [${state.hp}/${state.maxHp} HP]`);
+
       if (state.hp === 0) {
+        state.isAlive = false;
         state.log.push("💀 Has caído. Tu legado permanece en el Velo...");
       }
     },
 
-    explorar: () => {
+    explorar: async () => {
       const locations = [
         "Ruinas Antiguas",
         "Bosque de Corrosión",
@@ -351,25 +422,29 @@ function processCommand(cmd: string, state: GameState) {
       ];
       const newLoc = locations[Math.floor(Math.random() * locations.length)];
       state.location = newLoc;
+
+      const prompt = `Un viajero llega a: ${newLoc}. Describe este lugar en Aethelraed (máx 2 líneas, oscuro y gótico).`;
+      const description = await generateNarrative(prompt);
       state.log.push(`🗺️ Exploras y llegas a: ${newLoc}`);
-      state.log.push(describeLocation(newLoc));
+      state.log.push(description);
     },
 
-    hablar: () => {
+    hablar: async () => {
       const npcs = ["Maren Ojalata", "Elias el Escriba", "Un Mendigo Errante"];
       const npc = npcs[Math.floor(Math.random() * npcs.length)];
-      state.log.push(
-        `💬 ${npc}: "El mundo está consumido por el Óxido... ¿Qué buscas aquí?"`
-      );
+
+      const prompt = `${npc} habla con ${state.playerName} en el ${state.location}. ¿Qué le dice? (máx 2 líneas, misterioso y gótico)`;
+      const dialogue = await generateNarrative(prompt);
+      state.log.push(`💬 ${npc}: "${dialogue}"`);
     },
 
-    inventory: () => {
+    inventory: async () => {
       state.log.push("📦 Inventario:");
       state.log.push(`  - Daga (equipo)`);
       state.log.push(`  - ${state.gold} monedas de oro`);
     },
 
-    status: () => {
+    status: async () => {
       state.log.push("━━━ ESTADO ━━━");
       state.log.push(
         `${state.playerName} - ${state.playerClass} Nivel ${state.classLvl}`
@@ -379,7 +454,7 @@ function processCommand(cmd: string, state: GameState) {
       state.log.push(`HP: ${state.hp}/${state.maxHp} | Oro: ${state.gold}`);
     },
 
-    ayuda: () => {
+    ayuda: async () => {
       state.log.push("Comandos disponibles:");
       state.log.push("  atacar - Lucha contra enemigos");
       state.log.push("  explorar - Viaja a nuevas locaciones");
@@ -391,27 +466,10 @@ function processCommand(cmd: string, state: GameState) {
 
   const action = responses[cmd];
   if (action) {
-    action();
+    await action();
   } else {
     state.log.push(`❓ Comando desconocido: "${cmd}". Escribe 'ayuda' para ver opciones.`);
   }
-}
-
-function describeLocation(location: string): string {
-  const descriptions: Record<string, string> = {
-    "Ruinas Antiguas":
-      "Estructuras derruidas emergen de la niebla. Puedes sentir la presencia de algo antiguo.",
-    "Bosque de Corrosión":
-      "Árboles muertos rodean el camino. El aire huele a metal oxidado.",
-    "Torre del Escriba":
-      "Una torre de piedra se alza majestuosa. Luces extrañas brillan en las ventanas.",
-    "Mercado Subterráneo":
-      "Mercaderes vendedores ofrecen sus wares. El lugar respira de actividad.",
-    "Cavernas del Óxido":
-      "Profundas cavernas llenan de ecos. El agua gotea con un sonido metálico.",
-  };
-
-  return descriptions[location] || "Un lugar desconocido.";
 }
 
 export default app;
