@@ -572,14 +572,14 @@ app.post("/api/init", async (c) => {
   gameState = initializeGame(name);
 
   gameState.log.push(
-    "═══════════════════════════════════════════════════════════"
+    "══════════════════════════════════════════════════════════="
   );
   gameState.log.push("🌑 Bienvenido a Aethelraed: Infinity Engine 🌑");
   gameState.log.push(`Tu nombre es: ${name}`);
   gameState.log.push("El mundo está envuelto en óxido y corrupción.");
   gameState.log.push("Escribe tus acciones libremente. La IA interpretará tu destino.");
   gameState.log.push(
-    "═══════════════════════════════════════════════════════════"
+    "══════════════════════════════════════════════════════════="
   );
   gameState.log.push("Despiertas en la Taberna del Óxido...");
 
