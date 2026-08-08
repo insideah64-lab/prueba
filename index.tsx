@@ -145,30 +145,30 @@ async function interpretAction(
     const systemPrompt = `Eres el árbitro de un MUD llamado Aethelraed: Infinity Engine. 
  El jugador acaba de hacer una acción: "${action}"
 
- Contexto del mundo:
- - Nombre: ${state.playerName}
- - Clase: ${state.playerClass} (Nivel ${state.classLvl})
- - Oficio: ${state.playerJob} (Nivel ${state.jobLvl})
- - Ubicación: ${state.location}
- - HP: ${state.hp}/${state.maxHp}
- - Atributos: ${JSON.stringify(state.stats)}
+  Contexto del mundo:
+  - Nombre: ${state.playerName}
+  - Clase: ${state.playerClass} (Nivel ${state.classLvl})
+  - Oficio: ${state.playerJob} (Nivel ${state.jobLvl})
+  - Ubicación: ${state.location}
+  - HP: ${state.hp}/${state.maxHp}
+  - Atributos: ${JSON.stringify(state.stats)}
 
- INSTRUCCIONES:
- 1. Interpreta la acción del jugador de forma narrativa y creativa
- 2. Decide el impacto mecánico: daño recibido, experiencia ganada, ítems encontrados
- 3. Mantén un tono gótico, oscuro y épico
- 4. Responde en ESPAÑOL
- 5. Sé breve (máximo 3 líneas de narrativa)
+  INSTRUCCIONES:
+  1. Interpreta la acción del jugador de forma narrativa y creativa
+  2. Decide el impacto mecánico: daño recibido, experiencia ganada, ítems encontrados
+  3. Mantén un tono gótico, oscuro y épico
+  4. Responde en ESPAÑOL
+  5. Sé breve (máximo 3 líneas de narrativa)
 
- RESPONDE EN ESTE FORMATO EXACTO (JSON):
- {
-   "narrative": "Descripción épica de lo que pasó",
-   "hpChange": -10,
-   "xpChange": 25,
-   "itemsGained": [{"name": "Esencia de Óxido", "type": "material", "rarity": "Raro", "stats": {}}]
- }
+  RESPONDE EN ESTE FORMATO EXACTO (JSON):
+  {
+    "narrative": "Descripción épica de lo que pasó",
+    "hpChange": -10,
+    "xpChange": 25,
+    "itemsGained": [{"name": "Esencia de Óxido", "type": "material", "rarity": "Raro", "stats": {}}]
+  }
 
- Recuerda: hpChange negativo = daño. xpChange es experiencia ganada. itemsGained puede estar vacío.`;
+  Recuerda: hpChange negativo = daño. xpChange es experiencia ganada. itemsGained puede estar vacío.`;
 
     const response = await groq.messages.create({
       model: "mixtral-8x7b-32768",
@@ -275,7 +275,35 @@ app.get("/", (c) => {
         `}</style>
       </head>
       <body class="bg-gray-950 text-gray-100">
-        <div id="app" class="min-h-screen flex flex-col">
+        {/* Init Modal */}
+        <div id="initModal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div class="bg-gray-900 border border-purple-500 rounded-lg p-8 max-w-md">
+            <h2 class="text-2xl font-bold text-center mb-4 neon-text">
+              ⚔️ Aethelraed: Infinity Engine
+            </h2>
+            <p class="text-gray-400 text-center mb-6 text-sm">
+              Bienvenido, viajero. ¿Cuál es tu nombre?
+            </p>
+            <div class="flex gap-2">
+              <input
+                id="playerNameInput"
+                type="text"
+                placeholder="Introduce tu nombre..."
+                class="flex-1 mud-input px-3 py-2 rounded text-sm"
+                value="Darian"
+              />
+              <button
+                id="startBtn"
+                class="px-6 py-2 bg-green-700 hover:bg-green-600 rounded font-bold text-sm"
+              >
+                Empezar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Game Container */}
+        <div id="gameContainer" style="display: none;" class="min-h-screen flex flex-col">
           <div class="mud-header p-4 shadow-lg">
             <h1 class="text-3xl font-bold neon-text mb-1">
               ⚔️ Aethelraed: Infinity Engine
@@ -318,29 +346,29 @@ app.get("/", (c) => {
             <div class="w-80 flex flex-col gap-2 overflow-y-auto max-h-full">
               {/* Character Info */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h2 class="text-lg font-bold mb-2 neon-text">
-                  {gameState?.playerName || "Personaje"}
+                <h2 class="text-lg font-bold mb-2 neon-text" id="playerNameDisplay">
+                  Personaje
                 </h2>
 
                 <div class="space-y-1 text-xs">
                   <div class="flex justify-between">
                     <span class="text-gray-500">Clase:</span>
                     <span id="playerClass" class="font-bold text-blue-400">
-                      {gameState?.playerClass || "---"}
+                      ---
                     </span>
                   </div>
 
                   <div class="flex justify-between">
                     <span class="text-gray-500">Oficio:</span>
                     <span id="playerJob" class="font-bold text-purple-400">
-                      {gameState?.playerJob || "---"}
+                      ---
                     </span>
                   </div>
 
                   <div class="flex justify-between">
                     <span class="text-gray-500">Ubicación:</span>
                     <span id="location" class="font-bold text-cyan-400">
-                      {gameState?.location || "---"}
+                      ---
                     </span>
                   </div>
                 </div>
@@ -357,7 +385,7 @@ app.get("/", (c) => {
                   ></div>
                 </div>
                 <p id="hpText" class="text-xs text-gray-400">
-                  {gameState?.hp || 0} / {gameState?.maxHp || 100}
+                  100 / 100
                 </p>
               </div>
 
@@ -367,7 +395,7 @@ app.get("/", (c) => {
                   <div>
                     <div class="flex justify-between mb-1">
                       <span class="text-gray-500">Clase</span>
-                      <span id="classLvl">Lv. {gameState?.classLvl || 1}</span>
+                      <span id="classLvl">Lv. 1</span>
                     </div>
                     <div class="stat-bar">
                       <div
@@ -381,7 +409,7 @@ app.get("/", (c) => {
                   <div>
                     <div class="flex justify-between mb-1">
                       <span class="text-gray-500">Oficio</span>
-                      <span id="jobLvl">Lv. {gameState?.jobLvl || 1}</span>
+                      <span id="jobLvl">Lv. 1</span>
                     </div>
                     <div class="stat-bar">
                       <div
@@ -397,14 +425,11 @@ app.get("/", (c) => {
               {/* Atributos */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">Atributos</h3>
-                <div class="space-y-1 text-xs">
-                  {gameState?.stats &&
-                    Object.entries(gameState.stats).map(([attr, val]) => (
-                      <div key={attr} class="stat-item">
-                        <span class="text-gray-500">{attr}:</span>
-                        <span class="text-green-400 font-bold">{val}</span>
-                      </div>
-                    ))}
+                <div class="space-y-1 text-xs" id="atributesList">
+                  <div class="stat-item">
+                    <span class="text-gray-500">Fuerza:</span>
+                    <span class="text-green-400 font-bold">8</span>
+                  </div>
                 </div>
               </div>
 
@@ -415,42 +440,29 @@ app.get("/", (c) => {
                   <div class="flex justify-between">
                     <span class="text-gray-500">Oro:</span>
                     <span id="gold" class="text-yellow-400 font-bold">
-                      {gameState?.gold || 0}
+                      0
                     </span>
                   </div>
                   <div class="flex justify-between">
                     <span class="text-gray-500">Exp:</span>
                     <span id="exp" class="text-green-400 font-bold">
-                      {gameState?.experience || 0}
+                      0
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* Skills */}
-              {gameState?.skills && gameState.skills.length > 0 && (
-                <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                  <h3 class="font-bold mb-2 text-xs">Habilidades</h3>
-                  <div id="skillsList">
-                    {gameState.skills.map((skill) => (
-                      <span key={skill} class="skill-tag">
-                        {skill}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <div class="bg-gray-900 border border-gray-700 rounded p-3" id="skillsContainer" style="display: none;">
+                <h3 class="font-bold mb-2 text-xs">Habilidades</h3>
+                <div id="skillsList"></div>
+              </div>
 
               {/* Inventory */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h3 class="font-bold mb-2 text-xs">Inventario ({gameState?.inventory.length || 0})</h3>
+                <h3 class="font-bold mb-2 text-xs">Inventario (<span id="inventoryCount">0</span>)</h3>
                 <div id="inventoryList" class="space-y-1 text-xs max-h-48 overflow-y-auto">
-                  {gameState?.inventory.map((item, idx) => (
-                    <div key={idx} class="flex justify-between text-gray-400 border-b border-gray-700 pb-1">
-                      <span>{item.name} x{item.quantity || 1}</span>
-                      <span class="text-cyan-400">{item.rarity}</span>
-                    </div>
-                  ))}
+                  {/* Items will be populated here */}
                 </div>
               </div>
 
@@ -458,23 +470,7 @@ app.get("/", (c) => {
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">Facciones</h3>
                 <div id="factionList" class="space-y-1 text-xs">
-                  {gameState?.factionRep &&
-                    Object.entries(gameState.factionRep).map(([faction, rep]) => (
-                      <div key={faction} class="flex justify-between">
-                        <span class="text-gray-500">{faction}:</span>
-                        <span
-                          class={
-                            rep > 0
-                              ? "text-green-400"
-                              : rep < 0
-                                ? "text-red-400"
-                                : "text-gray-400"
-                          }
-                        >
-                          {rep > 0 ? "+" : ""}{rep}
-                        </span>
-                      </div>
-                    ))}
+                  {/* Factions will be populated here */}
                 </div>
               </div>
             </div>
@@ -484,22 +480,26 @@ app.get("/", (c) => {
         <script>
           {`
             let playerName = null;
+            let gameInitialized = false;
 
-            async function initGame() {
-              const name = prompt("¿Cuál es tu nombre, viajero?", "Darian");
-              if (name) {
-                playerName = name;
-                const res = await fetch("/api/init", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ name }),
-                });
-                const data = await res.json();
-                updateUI(data);
-              }
+            async function initGame(name) {
+              gameInitialized = true;
+              playerName = name;
+              document.getElementById("initModal").style.display = "none";
+              document.getElementById("gameContainer").style.display = "flex";
+              
+              const res = await fetch("/api/init", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name }),
+              });
+              const data = await res.json();
+              updateUI(data);
             }
 
             async function sendCommand() {
+              if (!gameInitialized) return;
+              
               const input = document.getElementById("commandInput");
               const btn = document.getElementById("sendBtn");
               const action = input.value.trim();
@@ -527,6 +527,7 @@ app.get("/", (c) => {
             }
 
             function updateUI(state) {
+              document.getElementById("playerNameDisplay").textContent = state.playerName;
               document.getElementById("playerClass").textContent = state.playerClass;
               document.getElementById("playerJob").textContent = state.playerJob;
               document.getElementById("classLvl").textContent = "Lv. " + state.classLvl;
@@ -545,6 +546,39 @@ app.get("/", (c) => {
               const jobXpPercent = (state.jobXp / (state.jobLvl * 100)) * 100;
               document.getElementById("jobXpFill").style.width = Math.min(jobXpPercent, 100) + "%";
 
+              // Update attributes
+              const attrList = document.getElementById("atributesList");
+              attrList.innerHTML = Object.entries(state.stats)
+                .map(([attr, val]) => \`<div class="stat-item"><span class="text-gray-500">\${attr}:</span><span class="text-green-400 font-bold">\${val}</span></div>\`)
+                .join("");
+
+              // Update inventory
+              const invList = document.getElementById("inventoryList");
+              invList.innerHTML = state.inventory.map((item, idx) => 
+                \`<div class="flex justify-between text-gray-400 border-b border-gray-700 pb-1">
+                  <span>\${item.name} x\${item.quantity || 1}</span>
+                  <span class="text-cyan-400">\${item.rarity}</span>
+                </div>\`
+              ).join("");
+              document.getElementById("inventoryCount").textContent = state.inventory.length;
+
+              // Update factions
+              const factList = document.getElementById("factionList");
+              factList.innerHTML = Object.entries(state.factionRep)
+                .map(([faction, rep]) => {
+                  const repClass = rep > 0 ? "text-green-400" : rep < 0 ? "text-red-400" : "text-gray-400";
+                  return \`<div class="flex justify-between"><span class="text-gray-500">\${faction}:</span><span class="\${repClass}">\${rep > 0 ? "+" : ""}\${rep}</span></div>\`;
+                })
+                .join("");
+
+              // Update skills
+              if (state.skills && state.skills.length > 0) {
+                document.getElementById("skillsContainer").style.display = "block";
+                document.getElementById("skillsList").innerHTML = state.skills
+                  .map(skill => \`<span class="skill-tag">\${skill}</span>\`)
+                  .join("");
+              }
+
               const log = document.getElementById("gameLog");
               log.innerHTML = state.log.map(msg => \`<p class="text-xs">\${msg}</p>\`).join("");
               log.scrollTop = log.scrollHeight;
@@ -558,7 +592,19 @@ app.get("/", (c) => {
               }
             });
 
-            initGame();
+            document.getElementById("startBtn").addEventListener("click", () => {
+              const nameInput = document.getElementById("playerNameInput");
+              const name = nameInput.value.trim() || "Darian";
+              initGame(name);
+            });
+
+            document.getElementById("playerNameInput").addEventListener("keypress", (e) => {
+              if (e.key === "Enter") {
+                const nameInput = document.getElementById("playerNameInput");
+                const name = nameInput.value.trim() || "Darian";
+                initGame(name);
+              }
+            });
           `}
         </script>
       </body>
