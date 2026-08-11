@@ -492,7 +492,7 @@ app.get("/", (c) => {
 
               // FIX: build log HTML correctly
               const log = document.getElementById("gameLog");
-              log.innerHTML = state.log.map((msg) => \`<p>\${msg}</p>\`).join("");
+              log.innerHTML = state.log.map((msg) => ` <p>${msg}</p>`).join("");
               log.scrollTop = log.scrollHeight;
             }
 
@@ -514,6 +514,19 @@ app.get("/", (c) => {
       </body>
     </html>
   );
+});
+
+// ===== TEMP DIAGNOSTIC ROUTES (REMOVE AFTER DEBUG) =====
+app.get("/_diag", (c) => {
+  return c.json({
+    bun_env_port: (typeof Bun !== "undefined" ? (Bun as any).env?.PORT : undefined),
+    process_env_port: process?.env?.PORT ?? undefined,
+    groq_key_present: Boolean((typeof Bun !== "undefined" ? (Bun as any).env?.GROQ_API_KEY : undefined) ?? process?.env?.GROQ_API_KEY),
+  });
+});
+
+app.get("/api/action", (c) => {
+  return c.text("GET /api/action OK");
 });
 
 // ===== API ENDPOINTS =====
@@ -538,6 +551,8 @@ app.post("/api/init", async (c) => {
 });
 
 app.post("/api/action", async (c) => {
+  console.log("REQUEST /api/action received - headers:", JSON.stringify(Object.fromEntries(c.req.headers)));
+
   if (!gameState) {
     return c.json({ error: "Game not initialized" }, 400);
   }
