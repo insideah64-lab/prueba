@@ -626,17 +626,34 @@ app.post("/api/action", async (c) => {
 });
 
 // ===== START SERVER (BUN) =====
-if (typeof Bun !== "undefined" && (Bun as any).serve) {
-  (Bun as any).serve({
-    fetch: app.fetch,
-    port: PORT,
-    hostname: HOST,
-    development: false,
-    async onRequest(request, server) {
-      return await app.fetch(request);
-    },
-  });
-  console.log(`Started server: http://${HOST}:${PORT}`);
+// Only call Bun.serve when this file is the main entry (import.meta.main === true).
+// This prevents deploy adapters or importers from having the module bind the port
+// and causing EADDRINUSE during platform startup.
+if (
+  typeof Bun !== "undefined" &&
+  (Bun as any).serve &&
+  (typeof import.meta !== "undefined" ? (import.meta as any).main : false)
+) {
+  try {
+    (Bun as any).serve({
+      fetch: app.fetch,
+      port: PORT,
+      hostname: HOST,
+      development: false,
+      async onRequest(request, server) {
+        return await app.fetch(request);
+      },
+    });
+    console.log(`Started server: http://${HOST}:${PORT}`);
+  } catch (err: any) {
+    // If the port is already in use, log a friendly message and keep the module
+    // usable by the deploy/runtime adapter (which may call into the exported app).
+    if (err && (err.code === "EADDRINUSE" || (err.message && err.message.includes("EADDRINUSE")))) {
+      console.error(`Port ${PORT} already in use — skipping Bun.serve().`, err);
+    } else {
+      console.error("Failed to start Bun server:", err);
+    }
+  }
 }
 
 // handle SIGTERM gracefully (best-effort)
