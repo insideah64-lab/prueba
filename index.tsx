@@ -6,15 +6,10 @@ import Groq from "groq-sdk";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 
 const app = new Hono();
-
-// Initialize Groq client
-const groq = new Groq({
-  apiKey: Bun.env.GROQ_API_KEY || "",
-});
-
-// Database for persistence
+const groq = new Groq({ apiKey: Bun.env.GROQ_API_KEY || "" });
 const SAVE_PATH = "/tmp/aethelraed_saves.json";
 
+// ===== TYPES =====
 interface Item {
   name: string;
   type: "arma" | "armadura" | "material" | "consumible";
@@ -42,9 +37,7 @@ interface GameState {
   isAlive: boolean;
   skills: string[];
   factionRep: Record<string, number>;
-  hungerThirst: { hunger: number; thirst: number };
   stats: Record<string, number>;
-  backstory: string;
   sessionId: string;
 }
 
@@ -58,6 +51,7 @@ const defaultStats = {
   Suerte: 8,
 };
 
+// ===== GAME STATE FUNCTIONS =====
 const initializeGame = (name: string): GameState => ({
   playerName: name,
   playerClass: "Guerrero",
@@ -100,29 +94,23 @@ const initializeGame = (name: string): GameState => ({
     "Barones del Plomo": 0,
     "Culto del Óxido": 0,
   },
-  hungerThirst: { hunger: 0, thirst: 0 },
   stats: defaultStats,
-  backstory: "",
   sessionId: Math.random().toString(36).substring(7),
 });
 
-// Save/Load functions
 function saveGame(state: GameState) {
-  const saves = loadAllSaves();
-  saves[state.sessionId] = state;
-  writeFileSync(SAVE_PATH, JSON.stringify(saves, null, 2));
-}
-
-function loadAllSaves(): Record<string, GameState> {
-  if (!existsSync(SAVE_PATH)) return {};
   try {
-    return JSON.parse(readFileSync(SAVE_PATH, "utf-8"));
-  } catch {
-    return {};
+    const saves = existsSync(SAVE_PATH)
+      ? JSON.parse(readFileSync(SAVE_PATH, "utf-8"))
+      : {};
+    saves[state.sessionId] = state;
+    writeFileSync(SAVE_PATH, JSON.stringify(saves, null, 2));
+  } catch (e) {
+    console.error("Save failed:", e);
   }
 }
 
-// AI Interpreter for free-form actions
+// ===== AI INTERPRETATION =====
 async function interpretAction(
   action: string,
   state: GameState
@@ -142,71 +130,52 @@ async function interpretAction(
   }
 
   try {
-    const systemPrompt = `Eres el árbitro de un MUD llamado Aethelraed: Infinity Engine. 
- El jugador acaba de hacer una acción: "${action}"
+    const prompt = `Eres el árbitro de Aethelraed: Infinity Engine. 
+ Jugador: ${state.playerName} (${state.playerClass} Lv${state.classLvl}, HP ${state.hp}/${state.maxHp})
+ Acción: "${action}"
 
-  Contexto del mundo:
-  - Nombre: ${state.playerName}
-  - Clase: ${state.playerClass} (Nivel ${state.classLvl})
-  - Oficio: ${state.playerJob} (Nivel ${state.jobLvl})
-  - Ubicación: ${state.location}
-  - HP: ${state.hp}/${state.maxHp}
-  - Atributos: ${JSON.stringify(state.stats)}
+ Responde SOLO en JSON válido:
+ {
+   "narrative": "Una frase épica y oscura de máx 2 líneas",
+   "hpChange": -10,
+   "xpChange": 25,
+   "itemsGained": []
+ }
 
-  INSTRUCCIONES:
-  1. Interpreta la acción del jugador de forma narrativa y creativa
-  2. Decide el impacto mecánico: daño recibido, experiencia ganada, ítems encontrados
-  3. Mantén un tono gótico, oscuro y épico
-  4. Responde en ESPAÑOL
-  5. Sé breve (máximo 3 líneas de narrativa)
-
-  RESPONDE EN ESTE FORMATO EXACTO (JSON):
-  {
-    "narrative": "Descripción épica de lo que pasó",
-    "hpChange": -10,
-    "xpChange": 25,
-    "itemsGained": [{"name": "Esencia de Óxido", "type": "material", "rarity": "Raro", "stats": {}}]
-  }
-
-  Recuerda: hpChange negativo = daño. xpChange es experiencia ganada. itemsGained puede estar vacío.`;
+ Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
 
     const response = await groq.messages.create({
       model: "mixtral-8x7b-32768",
-      max_tokens: 300,
-      messages: [
-        {
-          role: "user",
-          content: systemPrompt,
-        },
-      ],
+      max_tokens: 200,
+      messages: [{ role: "user", content: prompt }],
     });
 
-    const content = response.content[0];
-    if (content.type === "text") {
-      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const result = JSON.parse(jsonMatch[0]);
-        return {
-          narrative: result.narrative || "Algo sucedió...",
-          hpChange: result.hpChange || 0,
-          xpChange: result.xpChange || 0,
-          itemsGained: result.itemsGained || [],
-        };
-      }
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : "{}";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        narrative: parsed.narrative || "Algo sucede en la penumbra...",
+        hpChange: parsed.hpChange || 0,
+        xpChange: parsed.xpChange || 0,
+        itemsGained: parsed.itemsGained || [],
+      };
     }
   } catch (error) {
     console.error("Groq error:", error);
   }
 
   return {
-    narrative: "El silencio envuelve tu acción. Algo sucede, pero no logras verlo claramente.",
+    narrative: "El silencio envuelve tu acción...",
     hpChange: 0,
     xpChange: 10,
     itemsGained: [],
   };
 }
 
-// ===== RUTAS =====
+// ===== WEB ROUTES =====
 app.get("/", (c) => {
   return c.html(
     <html>
@@ -225,7 +194,7 @@ app.get("/", (c) => {
           .mud-log p {
             margin: 4px 0;
             line-height: 1.4;
-            word-wrap: break-word;
+            font-size: 13px;
           }
           .mud-input {
             background: #0a0e27;
@@ -253,122 +222,80 @@ app.get("/", (c) => {
           }
           .loading {
             animation: pulse 1s infinite;
+            opacity: 0.5;
           }
           @keyframes pulse {
-            0%, 100% { opacity: 0.5; }
-            50% { opacity: 1; }
-          }
-          .stat-item {
-            font-size: 11px;
-            display: flex;
-            justify-content: space-between;
-          }
-          .skill-tag {
-            display: inline-block;
-            background: #1a2f2a;
-            border: 1px solid #00d084;
-            padding: 2px 6px;
-            margin: 2px;
-            border-radius: 3px;
-            font-size: 10px;
+            0%, 100% {
+              opacity: 0.5;
+            }
+            50% {
+              opacity: 1;
+            }
           }
         `}</style>
       </head>
       <body class="bg-gray-950 text-gray-100">
-        {/* Init Modal */}
-        <div id="initModal" class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-          <div class="bg-gray-900 border border-purple-500 rounded-lg p-8 max-w-md">
-            <h2 class="text-2xl font-bold text-center mb-4 neon-text">
-              ⚔️ Aethelraed: Infinity Engine
-            </h2>
-            <p class="text-gray-400 text-center mb-6 text-sm">
-              Bienvenido, viajero. ¿Cuál es tu nombre?
-            </p>
-            <div class="flex gap-2">
-              <input
-                id="playerNameInput"
-                type="text"
-                placeholder="Introduce tu nombre..."
-                class="flex-1 mud-input px-3 py-2 rounded text-sm"
-                value="Darian"
-              />
-              <button
-                id="startBtn"
-                class="px-6 py-2 bg-green-700 hover:bg-green-600 rounded font-bold text-sm"
-              >
-                Empezar
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Game Container */}
-        <div id="gameContainer" style="display: none;" class="min-h-screen flex flex-col">
+        <div id="app" class="min-h-screen flex flex-col">
           <div class="mud-header p-4 shadow-lg">
             <h1 class="text-3xl font-bold neon-text mb-1">
               ⚔️ Aethelraed: Infinity Engine
             </h1>
             <p class="text-xs text-gray-400">
-              Escribe tus acciones libremente. La IA interpreta tu destino.
+              Escribe tus acciones. La IA interpreta tu destino.
             </p>
           </div>
 
-          <div class="flex-1 flex gap-3 p-3 max-w-full mx-auto w-full">
+          <div class="flex-1 flex gap-3 p-3 max-w-full overflow-hidden">
             {/* Main Game Area */}
-            <div class="flex-1 flex flex-col gap-3">
-              {/* Game Log */}
+            <div class="flex-1 flex flex-col gap-3 min-w-0">
+              {/* Log */}
               <div class="mud-log rounded p-3 flex-1 overflow-y-auto">
                 <div id="gameLog">
-                  <p class="text-yellow-400 text-sm">
-                    [Conectando con el Motor del Infinito...]
-                  </p>
+                  <p class="text-yellow-400">[Conectando con el Motor...]</p>
                 </div>
               </div>
 
               {/* Input */}
-              <div class="flex gap-2">
+              <div class="flex gap-2 flex-shrink-0">
                 <textarea
                   id="commandInput"
-                  placeholder="Escribe tu acción libremente (ej: 'ataco al monstruo con toda mi fuerza', 'busco oro en las ruinas', 'intento seducir al NPC')..."
+                  placeholder="Tu acción (ej: ataco al monstruo)..."
                   class="flex-1 mud-input px-3 py-2 rounded text-sm"
                   rows="2"
                 ></textarea>
                 <button
                   id="sendBtn"
-                  class="px-4 py-2 bg-green-700 hover:bg-green-600 rounded font-bold transition text-sm"
+                  class="px-4 py-2 bg-green-700 hover:bg-green-600 rounded font-bold text-sm flex-shrink-0"
                 >
                   Ejecutar
                 </button>
               </div>
             </div>
 
-            {/* Sidebar: Character Stats */}
-            <div class="w-80 flex flex-col gap-2 overflow-y-auto max-h-full">
-              {/* Character Info */}
+            {/* Sidebar */}
+            <div class="w-72 flex flex-col gap-2 overflow-y-auto flex-shrink-0">
+              {/* Character Card */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h2 class="text-lg font-bold mb-2 neon-text" id="playerNameDisplay">
-                  Personaje
+                <h2 class="text-lg font-bold neon-text mb-2">
+                  {gameState?.playerName || "---"}
                 </h2>
-
                 <div class="space-y-1 text-xs">
                   <div class="flex justify-between">
                     <span class="text-gray-500">Clase:</span>
                     <span id="playerClass" class="font-bold text-blue-400">
-                      ---
+                      {gameState?.playerClass || "---"}
                     </span>
                   </div>
-
                   <div class="flex justify-between">
                     <span class="text-gray-500">Oficio:</span>
                     <span id="playerJob" class="font-bold text-purple-400">
-                      ---
+                      {gameState?.playerJob || "---"}
                     </span>
                   </div>
-
                   <div class="flex justify-between">
                     <span class="text-gray-500">Ubicación:</span>
                     <span id="location" class="font-bold text-cyan-400">
-                      ---
+                      {gameState?.location || "---"}
                     </span>
                   </div>
                 </div>
@@ -378,57 +305,23 @@ app.get("/", (c) => {
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <label class="text-gray-500 text-xs block mb-1">Vitalidad</label>
                 <div class="stat-bar mb-1">
-                  <div
-                    id="hpFill"
-                    class="stat-fill"
-                    style="width: 100%"
-                  ></div>
+                  <div id="hpFill" class="stat-fill" style="width: 100%"></div>
                 </div>
                 <p id="hpText" class="text-xs text-gray-400">
-                  100 / 100
+                  {gameState?.hp || 0} / {gameState?.maxHp || 100}
                 </p>
               </div>
 
               {/* Levels */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <div class="space-y-2 text-xs">
-                  <div>
-                    <div class="flex justify-between mb-1">
-                      <span class="text-gray-500">Clase</span>
-                      <span id="classLvl">Lv. 1</span>
-                    </div>
-                    <div class="stat-bar">
-                      <div
-                        id="classXpFill"
-                        class="stat-fill bg-blue-500"
-                        style="width: 0%"
-                      ></div>
-                    </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-500">Clase Lv:</span>
+                    <span id="classLvl">{gameState?.classLvl || 1}</span>
                   </div>
-
-                  <div>
-                    <div class="flex justify-between mb-1">
-                      <span class="text-gray-500">Oficio</span>
-                      <span id="jobLvl">Lv. 1</span>
-                    </div>
-                    <div class="stat-bar">
-                      <div
-                        id="jobXpFill"
-                        class="stat-fill bg-purple-500"
-                        style="width: 0%"
-                      ></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Atributos */}
-              <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h3 class="font-bold mb-2 text-xs">Atributos</h3>
-                <div class="space-y-1 text-xs" id="atributesList">
-                  <div class="stat-item">
-                    <span class="text-gray-500">Fuerza:</span>
-                    <span class="text-green-400 font-bold">8</span>
+                  <div class="flex justify-between">
+                    <span class="text-gray-500">Oficio Lv:</span>
+                    <span id="jobLvl">{gameState?.jobLvl || 1}</span>
                   </div>
                 </div>
               </div>
@@ -440,29 +333,15 @@ app.get("/", (c) => {
                   <div class="flex justify-between">
                     <span class="text-gray-500">Oro:</span>
                     <span id="gold" class="text-yellow-400 font-bold">
-                      0
+                      {gameState?.gold || 0}
                     </span>
                   </div>
                   <div class="flex justify-between">
-                    <span class="text-gray-500">Exp:</span>
+                    <span class="text-gray-500">XP:</span>
                     <span id="exp" class="text-green-400 font-bold">
-                      0
+                      {gameState?.experience || 0}
                     </span>
                   </div>
-                </div>
-              </div>
-
-              {/* Skills */}
-              <div class="bg-gray-900 border border-gray-700 rounded p-3" id="skillsContainer" style="display: none;">
-                <h3 class="font-bold mb-2 text-xs">Habilidades</h3>
-                <div id="skillsList"></div>
-              </div>
-
-              {/* Inventory */}
-              <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h3 class="font-bold mb-2 text-xs">Inventario (<span id="inventoryCount">0</span>)</h3>
-                <div id="inventoryList" class="space-y-1 text-xs max-h-48 overflow-y-auto">
-                  {/* Items will be populated here */}
                 </div>
               </div>
 
@@ -470,7 +349,35 @@ app.get("/", (c) => {
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">Facciones</h3>
                 <div id="factionList" class="space-y-1 text-xs">
-                  {/* Factions will be populated here */}
+                  <div class="flex justify-between">
+                    <span class="text-gray-500">Barones del Plomo:</span>
+                    <span id="baron" class="text-gray-400">0</span>
+                  </div>
+                  <div class="flex justify-between">
+                    <span class="text-gray-500">Culto del Óxido:</span>
+                    <span id="cult" class="text-gray-400">0</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Inventory */}
+              <div class="bg-gray-900 border border-gray-700 rounded p-3">
+                <h3 class="font-bold mb-2 text-xs">
+                  Inventario ({gameState?.inventory.length || 0})
+                </h3>
+                <div
+                  id="inventoryList"
+                  class="space-y-1 text-xs max-h-40 overflow-y-auto"
+                >
+                  {gameState?.inventory.map((item, idx) => (
+                    <div
+                      key={idx}
+                      class="flex justify-between border-b border-gray-700 pb-1"
+                    >
+                      <span>{item.name}</span>
+                      <span class="text-cyan-400">{item.rarity}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -479,15 +386,9 @@ app.get("/", (c) => {
 
         <script>
           {`
-            let playerName = null;
-            let gameInitialized = false;
-
-            async function initGame(name) {
-              gameInitialized = true;
-              playerName = name;
-              document.getElementById("initModal").style.display = "none";
-              document.getElementById("gameContainer").style.display = "flex";
-              
+            async function initGame() {
+              const name = prompt("¿Cuál es tu nombre, viajero?", "Darian");
+              if (!name) return;
               const res = await fetch("/api/init", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -498,8 +399,6 @@ app.get("/", (c) => {
             }
 
             async function sendCommand() {
-              if (!gameInitialized) return;
-              
               const input = document.getElementById("commandInput");
               const btn = document.getElementById("sendBtn");
               const action = input.value.trim();
@@ -508,18 +407,22 @@ app.get("/", (c) => {
               btn.disabled = true;
               btn.classList.add("loading");
               input.disabled = true;
-              btn.textContent = "Procesando...";
+              btn.textContent = "...";
 
-              const res = await fetch("/api/action", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ action }),
-              });
-              const data = await res.json();
-              updateUI(data);
-              input.value = "";
-              input.focus();
-              
+              try {
+                const res = await fetch("/api/action", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action }),
+                });
+                const data = await res.json();
+                updateUI(data);
+                input.value = "";
+                input.focus();
+              } catch (e) {
+                console.error(e);
+              }
+
               btn.disabled = false;
               btn.classList.remove("loading");
               btn.textContent = "Ejecutar";
@@ -527,84 +430,45 @@ app.get("/", (c) => {
             }
 
             function updateUI(state) {
-              document.getElementById("playerNameDisplay").textContent = state.playerName;
-              document.getElementById("playerClass").textContent = state.playerClass;
+              document.getElementById("playerClass").textContent =
+                state.playerClass;
               document.getElementById("playerJob").textContent = state.playerJob;
-              document.getElementById("classLvl").textContent = "Lv. " + state.classLvl;
-              document.getElementById("jobLvl").textContent = "Lv. " + state.jobLvl;
               document.getElementById("location").textContent = state.location;
+              document.getElementById("classLvl").textContent = state.classLvl;
+              document.getElementById("jobLvl").textContent = state.jobLvl;
               document.getElementById("gold").textContent = state.gold;
               document.getElementById("exp").textContent = state.experience;
+              document.getElementById("baron").textContent =
+                state.factionRep["Barones del Plomo"] || 0;
+              document.getElementById("cult").textContent =
+                state.factionRep["Culto del Óxido"] || 0;
 
               const hpPercent = (state.hp / state.maxHp) * 100;
-              document.getElementById("hpFill").style.width = hpPercent + "%";
-              document.getElementById("hpText").textContent = state.hp + " / " + state.maxHp;
-
-              const classXpPercent = (state.classXp / (state.classLvl * 100)) * 100;
-              document.getElementById("classXpFill").style.width = Math.min(classXpPercent, 100) + "%";
-
-              const jobXpPercent = (state.jobXp / (state.jobLvl * 100)) * 100;
-              document.getElementById("jobXpFill").style.width = Math.min(jobXpPercent, 100) + "%";
-
-              // Update attributes
-              const attrList = document.getElementById("atributesList");
-              attrList.innerHTML = Object.entries(state.stats)
-                .map(([attr, val]) => \`<div class="stat-item"><span class="text-gray-500">\${attr}:</span><span class="text-green-400 font-bold">\${val}</span></div>\`)
-                .join("");
-
-              // Update inventory
-              const invList = document.getElementById("inventoryList");
-              invList.innerHTML = state.inventory.map((item, idx) => 
-                \`<div class="flex justify-between text-gray-400 border-b border-gray-700 pb-1">
-                  <span>\${item.name} x\${item.quantity || 1}</span>
-                  <span class="text-cyan-400">\${item.rarity}</span>
-                </div>\`
-              ).join("");
-              document.getElementById("inventoryCount").textContent = state.inventory.length;
-
-              // Update factions
-              const factList = document.getElementById("factionList");
-              factList.innerHTML = Object.entries(state.factionRep)
-                .map(([faction, rep]) => {
-                  const repClass = rep > 0 ? "text-green-400" : rep < 0 ? "text-red-400" : "text-gray-400";
-                  return \`<div class="flex justify-between"><span class="text-gray-500">\${faction}:</span><span class="\${repClass}">\${rep > 0 ? "+" : ""}\${rep}</span></div>\`;
-                })
-                .join("");
-
-              // Update skills
-              if (state.skills && state.skills.length > 0) {
-                document.getElementById("skillsContainer").style.display = "block";
-                document.getElementById("skillsList").innerHTML = state.skills
-                  .map(skill => \`<span class="skill-tag">\${skill}</span>\`)
-                  .join("");
-              }
+              document.getElementById("hpFill").style.width =
+                Math.min(hpPercent, 100) + "%";
+              document.getElementById("hpText").textContent =
+                state.hp + " / " + state.maxHp;
 
               const log = document.getElementById("gameLog");
-              log.innerHTML = state.log.map(msg => \`<p class="text-xs">\${msg}</p>\`).join("");
+              log.innerHTML = state.log
+                .map((msg) => `\<p>\${msg}\</p>`) 
+                .join("");
               log.scrollTop = log.scrollHeight;
             }
 
-            document.getElementById("sendBtn").addEventListener("click", sendCommand);
-            document.getElementById("commandInput").addEventListener("keypress", (e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendCommand();
-              }
-            });
+            document
+              .getElementById("sendBtn")
+              .addEventListener("click", sendCommand);
+            document
+              .getElementById("commandInput")
+              .addEventListener("keypress", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendCommand();
+                }
+              });
 
-            document.getElementById("startBtn").addEventListener("click", () => {
-              const nameInput = document.getElementById("playerNameInput");
-              const name = nameInput.value.trim() || "Darian";
-              initGame(name);
-            });
-
-            document.getElementById("playerNameInput").addEventListener("keypress", (e) => {
-              if (e.key === "Enter") {
-                const nameInput = document.getElementById("playerNameInput");
-                const name = nameInput.value.trim() || "Darian";
-                initGame(name);
-              }
-            });
+            initGame();
           `}
         </script>
       </body>
@@ -612,7 +476,7 @@ app.get("/", (c) => {
   );
 });
 
-// API endpoint: Initialize game
+// ===== API ENDPOINTS =====
 app.post("/api/init", async (c) => {
   const { name } = await c.req.json();
   gameState = initializeGame(name);
@@ -623,7 +487,7 @@ app.post("/api/init", async (c) => {
   gameState.log.push("🌑 Bienvenido a Aethelraed: Infinity Engine 🌑");
   gameState.log.push(`Tu nombre es: ${name}`);
   gameState.log.push("El mundo está envuelto en óxido y corrupción.");
-  gameState.log.push("Escribe tus acciones libremente. La IA interpretará tu destino.");
+  gameState.log.push("Escribe tus acciones libremente.");
   gameState.log.push(
     "══════════════════════════════════════════════════════════="
   );
@@ -633,7 +497,6 @@ app.post("/api/init", async (c) => {
   return c.json(gameState);
 });
 
-// API endpoint: Process free-form action
 app.post("/api/action", async (c) => {
   if (!gameState) {
     return c.json({ error: "Game not initialized" }, 400);
@@ -649,16 +512,17 @@ app.post("/api/action", async (c) => {
   // Interpret action with AI
   const result = await interpretAction(action, gameState);
 
-  // Apply results to game state
+  // Log action
   gameState.log.push(`> ${action}`);
   gameState.log.push(`✨ ${result.narrative}`);
 
+  // Apply changes
   gameState.hp = Math.max(0, gameState.hp + result.hpChange);
   gameState.experience += result.xpChange;
   gameState.classXp += Math.floor(result.xpChange * 0.6);
   gameState.jobXp += Math.floor(result.xpChange * 0.4);
 
-  // Check level ups
+  // Check levelups
   if (gameState.classXp >= gameState.classLvl * 100) {
     gameState.classLvl++;
     gameState.classXp = 0;
@@ -673,7 +537,7 @@ app.post("/api/action", async (c) => {
     gameState.jobLvl++;
     gameState.jobXp = 0;
     gameState.log.push(
-      `🎯 ¡MAESTRÍA PROFESIONAL! Tu oficio de ${gameState.playerJob} es ahora Nivel ${gameState.jobLvl}`
+      `🎯 ¡MAESTRÍA! Tu oficio ${gameState.playerJob} es ahora Nivel ${gameState.jobLvl}`
     );
   }
 
@@ -684,7 +548,7 @@ app.post("/api/action", async (c) => {
   }
 
   // Check death
-  if (gameState.hp === 0) {
+  if (gameState.hp <= 0) {
     gameState.isAlive = false;
     gameState.log.push("💀 Has caído. Tu legado permanece en el Velo...");
   }
