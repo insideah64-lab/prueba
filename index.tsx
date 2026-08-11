@@ -491,16 +491,16 @@ app.get("/", (c) => {
             }
 
             document
-              .getElementById("sendBtn")
-              .addEventListener("click", sendCommand);
+            .getElementById("sendBtn")
+            .addEventListener("click", sendCommand);
             document
-              .getElementById("commandInput")
-              .addEventListener("keypress", (e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  sendCommand();
-                }
-              });
+            .getElementById("commandInput")
+            .addEventListener("keypress", (e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendCommand();
+              }
+            });
 
             initGame();
           `}
@@ -625,17 +625,25 @@ app.post("/api/action", async (c) => {
 });
 
 // ===== START SERVER (BUN) =====
-if (typeof Bun !== "undefined" && (Bun as any).serve) {
-  (Bun as any).serve({
-    fetch: app.fetch,
-    port: PORT,
-    hostname: HOST,
-    development: false,
-    async onRequest(request, server) {
-      return await app.fetch(request);
-    },
-  });
-  console.log(`Started server: http://${HOST}:${PORT}`);
+try {
+  if (typeof Bun !== "undefined" && (Bun as any).serve) {
+    (Bun as any).serve({
+      fetch: app.fetch,
+      port: PORT,
+      hostname: HOST,
+      development: false,
+      async onRequest(request, server) {
+        return await app.fetch(request);
+      },
+    });
+    console.log(`Started server: http://${HOST}:${PORT}`);
+  }
+} catch (e: any) {
+  if (e?.code === "EADDRINUSE") {
+    console.warn("Port already in use; assuming the platform started the server. Skipping Bun.serve().");
+  } else {
+    throw e;
+  }
 }
 
 // handle SIGTERM gracefully (best-effort)
