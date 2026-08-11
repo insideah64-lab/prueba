@@ -6,7 +6,31 @@ import Groq from "groq-sdk";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 
 const app = new Hono();
-const groq = new Groq({ apiKey: Bun.env.GROQ_API_KEY || "" });
+
+// ===== ENV / SERVER CONFIG =====
+const PORT = Number(Bun.env.PORT ?? process.env.PORT ?? 8080);
+const HOST = "0.0.0.0";
+
+console.log("DEBUG env:", {
+  PORT,
+  GROQ_KEY_PRESENT: Boolean(Bun.env.GROQ_API_KEY ?? process.env.GROQ_API_KEY),
+});
+
+// ===== GROQ CLIENT INITIALIZATION (SEGURA) =====
+let groq: any = null;
+const GROQ_KEY = Bun.env.GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? "";
+
+if (GROQ_KEY) {
+  try {
+    groq = new (Groq as any)({ apiKey: GROQ_KEY });
+  } catch (e) {
+    console.error("Error inicializando Groq SDK:", e);
+    groq = null;
+  }
+} else {
+  console.warn("No GROQ API key found in environment. Groq client disabled.");
+}
+
 const SAVE_PATH = "/tmp/aethelraed_saves.json";
 
 // ===== TYPES =====
@@ -120,7 +144,7 @@ async function interpretAction(
   xpChange: number;
   itemsGained: Item[];
 }> {
-  if (!Bun.env.GROQ_API_KEY) {
+  if (!groq) {
     return {
       narrative: "La IA está offline. Intenta luego.",
       hpChange: 0,
@@ -144,27 +168,44 @@ async function interpretAction(
 
  Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
 
-    const response = await groq.messages.create({
-      model: "mixtral-8x7b-32768",
-      max_tokens: 200,
-      messages: [{ role: "user", content: prompt }],
-    });
+    const call = async () => {
+      const response = await groq.messages.create({
+        model: "mixtral-8x7b-32768",
+        max_tokens: 200,
+        messages: [{ role: "user", content: prompt }],
+      });
 
-    const text =
-      response.content[0].type === "text" ? response.content[0].text : "{}";
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
+      const text =
+        response.content?.[0]?.type === "text" ? response.content[0].text : "{}";
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          narrative: parsed.narrative || "Algo sucede en la penumbra...",
+          hpChange: parsed.hpChange || 0,
+          xpChange: parsed.xpChange || 0,
+          itemsGained: parsed.itemsGained || [],
+        };
+      }
       return {
-        narrative: parsed.narrative || "Algo sucede en la penumbra...",
-        hpChange: parsed.hpChange || 0,
-        xpChange: parsed.xpChange || 0,
-        itemsGained: parsed.itemsGained || [],
+        narrative: "El silencio envuelve tu acción...",
+        hpChange: 0,
+        xpChange: 10,
+        itemsGained: [],
       };
-    }
+    };
+
+    // Timeout guard (10s)
+    const timeoutMs = 10000;
+    const result = await Promise.race([
+      call(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("GROQ timeout")), timeoutMs)
+      ),
+    ]);
+    return result as any;
   } catch (error) {
-    console.error("Groq error:", error);
+    console.error("Groq error o timeout:", error);
   }
 
   return {
@@ -377,7 +418,7 @@ app.get("/", (c) => {
                       <span>{item.name}</span>
                       <span class="text-cyan-400">{item.rarity}</span>
                     </div>
-                  ))}
+                  )) || null}
                 </div>
               </div>
             </div>
@@ -449,10 +490,9 @@ app.get("/", (c) => {
               document.getElementById("hpText").textContent =
                 state.hp + " / " + state.maxHp;
 
+              // FIX: build log HTML correctly
               const log = document.getElementById("gameLog");
-              log.innerHTML = state.log
-                .map((msg) => `\<p>\${msg}\</p>`) 
-                .join("");
+              log.innerHTML = state.log.map((msg) => \`<p>\${msg}</p>\`).join("");
               log.scrollTop = log.scrollHeight;
             }
 
@@ -509,7 +549,7 @@ app.post("/api/action", async (c) => {
 
   const { action } = await c.req.json();
 
-  // Interpret action with AI
+  // Interpret action with AI (with timeout inside interpretAction)
   const result = await interpretAction(action, gameState);
 
   // Log action
@@ -569,5 +609,38 @@ app.post("/api/action", async (c) => {
   saveGame(gameState);
   return c.json(gameState);
 });
+
+// ===== START SERVER (BUN) =====
+if (typeof Bun !== "undefined" && (Bun as any).serve) {
+  (Bun as any).serve({
+    fetch: app.fetch,
+    port: PORT,
+    hostname: HOST,
+    development: false,
+    async onRequest(request, server) {
+      return await app.fetch(request);
+    },
+  });
+  console.log(`Started server: http://${HOST}:${PORT}`);
+}
+
+// handle SIGTERM gracefully (best-effort)
+if (typeof process !== "undefined" && process?.on) {
+  process.on("SIGTERM", () => {
+    console.log("SIGTERM recibida, cerrando...");
+    try {
+      // salvo si hay estado
+      if (gameState) saveGame(gameState);
+    } catch (e) {
+      console.error("Error saving on SIGTERM:", e);
+    }
+    // allow the platform to kill the process after cleanup
+    setTimeout(() => {
+      try {
+        process.exit(0);
+      } catch {}
+    }, 1000);
+  });
+}
 
 export default app;
