@@ -402,9 +402,4 @@ app.get("/", (c) => {
               </div>
 
               {/* Inventory */}
-              <div class="bg-gray-900 border border-gray-700 rounded p-3">
-                <h3 class="font-bold mb-2 text-xs">
-                  Inventario ({gameState?.inventory.length || 0})
-                </h3>
-                <div
-{
+                
