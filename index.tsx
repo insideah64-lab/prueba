@@ -155,18 +155,18 @@ async function interpretAction(
 
   try {
     const prompt = `Eres el árbitro de Aethelraed: Infinity Engine. 
- Jugador: ${state.playerName} (${state.playerClass} Lv${state.classLvl}, HP ${state.hp}/${state.maxHp})
- Acción: "${action}"
+Jugador: ${state.playerName} (${state.playerClass} Lv${state.classLvl}, HP ${state.hp}/${state.maxHp})
+Acción: "${action}"
 
- Responde SOLO en JSON válido:
- {
-   "narrative": "Una frase épica y oscura de máx 2 líneas",
-   "hpChange": -10,
-   "xpChange": 25,
-   "itemsGained": []
- }
+Responde SOLO en JSON válido:
+{
+  "narrative": "Una frase épica y oscura de máx 2 líneas",
+  "hpChange": -10,
+  "xpChange": 25,
+  "itemsGained": []
+}
 
- Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
+Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
 
     const call = async () => {
       const response = await groq.messages.create({
@@ -406,4 +406,255 @@ app.get("/", (c) => {
                 <h3 class="font-bold mb-2 text-xs">
                   Inventario ({gameState?.inventory.length || 0})
                 </h3>
-                <div
+                <div id="inventoryList" class="space-y-1 text-xs max-h-40 overflow-y-auto">
+                  {gameState?.inventory.map((item, idx) => (
+                    <div key={idx} class="flex justify-between border-b border-gray-700 pb-1">
+                      <span>{item.name}</span>
+                      <span class="text-cyan-400">{item.rarity}</span>
+                    </div>
+                  )) || null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <script>
+          {`
+            async function initGame() {
+              const name = prompt("¿Cuál es tu nombre, viajero?", "Darian");
+              if (!name) return;
+              const res = await fetch("/api/init", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name }),
+              });
+              const data = await res.json();
+              updateUI(data);
+            }
+
+            async function sendCommand() {
+              const input = document.getElementById("commandInput");
+              const btn = document.getElementById("sendBtn");
+              const action = input.value.trim();
+              if (!action) return;
+
+              btn.disabled = true;
+              btn.classList.add("loading");
+              input.disabled = true;
+              btn.textContent = "...";
+
+              try {
+                const res = await fetch("/api/action", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action }),
+                });
+                const data = await res.json();
+                updateUI(data);
+                input.value = "";
+                input.focus();
+              } catch (e) {
+                console.error(e);
+              }
+
+              btn.disabled = false;
+              btn.classList.remove("loading");
+              btn.textContent = "Ejecutar";
+              input.disabled = false;
+            }
+
+            function updateUI(state) {
+              document.getElementById("playerClass").textContent =
+                state.playerClass;
+              document.getElementById("playerJob").textContent = state.playerJob;
+              document.getElementById("location").textContent = state.location;
+              document.getElementById("classLvl").textContent = state.classLvl;
+              document.getElementById("jobLvl").textContent = state.jobLvl;
+              document.getElementById("gold").textContent = state.gold;
+              document.getElementById("exp").textContent = state.experience;
+              document.getElementById("baron").textContent =
+                state.factionRep["Barones del Plomo"] || 0;
+              document.getElementById("cult").textContent =
+                state.factionRep["Culto del Óxido"] || 0;
+
+              const hpPercent = (state.hp / state.maxHp) * 100;
+              document.getElementById("hpFill").style.width =
+                Math.min(hpPercent, 100) + "%";
+              document.getElementById("hpText").textContent =
+                state.hp + " / " + state.maxHp;
+
+              // FIX: build log HTML correctly
+              const log = document.getElementById("gameLog");
+              log.innerHTML = state.log.map((msg) => '<p>' + msg + '</p>').join("");
+              log.scrollTop = log.scrollHeight;
+            }
+
+            document
+              .getElementById("sendBtn")
+              .addEventListener("click", sendCommand);
+            document
+              .getElementById("commandInput")
+              .addEventListener("keypress", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  sendCommand();
+                }
+              });
+
+            initGame();
+          `}
+        </script>
+      </body>
+    </html>
+  );
+});
+
+// ===== TEMP DIAGNOSTIC ROUTES (REMOVE AFTER DEBUG) =====
+app.get("/_diag", (c) => {
+  return c.json({
+    bun_env_port: (typeof Bun !== "undefined" ? (Bun as any).env?.PORT : undefined),
+    process_env_port: process?.env?.PORT ?? undefined,
+    groq_key_present: Boolean((typeof Bun !== "undefined" ? (Bun as any).env?.GROQ_API_KEY : undefined) ?? process?.env?.GROQ_API_KEY),
+  });
+});
+
+app.get("/ping", (c) => {
+  console.log("PING /ping received");
+  return c.text("pong");
+});
+
+app.get("/api/action", (c) => {
+  return c.text("GET /api/action OK");
+});
+
+// ===== API ENDPOINTS =====
+app.post("/api/init", async (c) => {
+  const { name } = await c.req.json();
+  gameState = initializeGame(name);
+
+  gameState.log.push(
+    "══════════════════════════════════════════════════════════="
+  );
+  gameState.log.push("🌑 Bienvenido a Aethelraed: Infinity Engine 🌑");
+  gameState.log.push(`Tu nombre es: ${name}`);
+  gameState.log.push("El mundo está envuelto en óxido y corrupción.");
+  gameState.log.push("Escribe tus acciones libremente.");
+  gameState.log.push(
+    "══════════════════════════════════════════════════════════="
+  );
+  gameState.log.push("Despiertas en la Taberna del Óxido...");
+
+  saveGame(gameState);
+  return c.json(gameState);
+});
+
+app.post("/api/action", async (c) => {
+  console.log("REQUEST /api/action received - headers:", JSON.stringify(Object.fromEntries(c.req.headers)));
+
+  if (!gameState) {
+    return c.json({ error: "Game not initialized" }, 400);
+  }
+
+  if (!gameState.isAlive) {
+    gameState.log.push("💀 Estás muerto. Tu aventura ha terminado.");
+    return c.json(gameState);
+  }
+
+  const { action } = await c.req.json();
+
+  // Interpret action with AI (with timeout inside interpretAction)
+  const result = await interpretAction(action, gameState);
+
+  // Log action
+  gameState.log.push(`> ${action}`);
+  gameState.log.push(`✨ ${result.narrative}`);
+
+  // Apply changes
+  gameState.hp = Math.max(0, gameState.hp + result.hpChange);
+  gameState.experience += result.xpChange;
+  gameState.classXp += Math.floor(result.xpChange * 0.6);
+  gameState.jobXp += Math.floor(result.xpChange * 0.4);
+
+  // Check levelups
+  if (gameState.classXp >= gameState.classLvl * 100) {
+    gameState.classLvl++;
+    gameState.classXp = 0;
+    gameState.maxHp += 20;
+    gameState.hp = gameState.maxHp;
+    gameState.log.push(
+      `🌟 ¡ASCENSIÓN DE CLASE! Ahora eres ${gameState.playerClass} Nivel ${gameState.classLvl}`
+    );
+  }
+
+  if (gameState.jobXp >= gameState.jobLvl * 100) {
+    gameState.jobLvl++;
+    gameState.jobXp = 0;
+    gameState.log.push(
+      `🎯 ¡MAESTRÍA! Tu oficio ${gameState.playerJob} es ahora Nivel ${gameState.jobLvl}`
+    );
+  }
+
+  // Add items
+  for (const item of result.itemsGained) {
+    gameState.inventory.push(item);
+    gameState.log.push(`📦 Obtuviste: ${item.name} (${item.rarity})`);
+  }
+
+  // Check death
+  if (gameState.hp <= 0) {
+    gameState.isAlive = false;
+    gameState.log.push("💀 Has caído. Tu legado permanece en el Velo...");
+  }
+
+  // Random world events
+  if (Math.random() < 0.1) {
+    const events = [
+      "Una niebla errante desciende sobre la zona...",
+      "Escuchas un grito lejano en la oscuridad...",
+      "El suelo tiembla bajo tus pies...",
+      "Una sombra misteriosa cruza tu camino...",
+    ];
+    gameState.log.push(
+      `⚠️ ${events[Math.floor(Math.random() * events.length)]}`
+    );
+  }
+
+  saveGame(gameState);
+  return c.json(gameState);
+});
+
+// ===== START SERVER (BUN) =====
+if (typeof Bun !== "undefined" && (Bun as any).serve) {
+  (Bun as any).serve({
+    fetch: app.fetch,
+    port: PORT,
+    hostname: HOST,
+    development: false,
+    async onRequest(request, server) {
+      return await app.fetch(request);
+    },
+  });
+  console.log(`Started server: http://${HOST}:${PORT}`);
+}
+
+// handle SIGTERM gracefully (best-effort)
+if (typeof process !== "undefined" && process?.on) {
+  process.on("SIGTERM", () => {
+    console.log("SIGTERM recibida, cerrando...");
+    try {
+      // salvo si hay estado
+      if (gameState) saveGame(gameState);
+    } catch (e) {
+      console.error("Error saving on SIGTERM:", e);
+    }
+    // allow the platform to kill the process after cleanup
+    setTimeout(() => {
+      try {
+        process.exit(0);
+      } catch {}
+    }, 1000);
+  });
+}
+
+export default app;
