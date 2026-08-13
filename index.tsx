@@ -6,34 +6,9 @@ import Groq from "groq-sdk";
 import { writeFileSync, readFileSync, existsSync } from "fs";
 
 const app = new Hono();
-
-// ===== ENV / SERVER CONFIG =====
-const PORT = Number(Bun.env.PORT ?? process.env.PORT ?? 8080);
-const HOST = "0.0.0.0";
-
-console.log("DEBUG env:", {
-  PORT,
-  GROQ_KEY_PRESENT: Boolean(Bun.env.GROQ_API_KEY ?? process.env.GROQ_API_KEY),
-});
-
-// ===== GROQ CLIENT INITIALIZATION (SEGURA) =====
-let groq: any = null;
-const GROQ_KEY = Bun.env.GROQ_API_KEY ?? process.env.GROQ_API_KEY ?? "";
-
-if (GROQ_KEY) {
-  try {
-    groq = new (Groq as any)({ apiKey: GROQ_KEY });
-  } catch (e) {
-    console.error("Error inicializando Groq SDK:", e);
-    groq = null;
-  }
-} else {
-  console.warn("No GROQ API key found in environment. Groq client disabled.");
-}
-
+const groq = new Groq({ apiKey: Bun.env.GROQ_API_KEY || "" });
 const SAVE_PATH = "/tmp/aethelraed_saves.json";
 
-// ===== TYPES =====
 interface Item {
   name: string;
   type: "arma" | "armadura" | "material" | "consumible";
@@ -75,7 +50,6 @@ const defaultStats = {
   Suerte: 8,
 };
 
-// ===== GAME STATE FUNCTIONS =====
 const initializeGame = (name: string): GameState => ({
   playerName: name,
   playerClass: "Guerrero",
@@ -134,7 +108,6 @@ function saveGame(state: GameState) {
   }
 }
 
-// ===== AI INTERPRETATION =====
 async function interpretAction(
   action: string,
   state: GameState
@@ -144,7 +117,7 @@ async function interpretAction(
   xpChange: number;
   itemsGained: Item[];
 }> {
-  if (!groq) {
+  if (!Bun.env.GROQ_API_KEY) {
     return {
       narrative: "La IA está offline. Intenta luego.",
       hpChange: 0,
@@ -164,48 +137,29 @@ Responde SOLO en JSON válido:
   "hpChange": -10,
   "xpChange": 25,
   "itemsGained": []
-}
+}`;
 
-Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
+    const response = await groq.messages.create({
+      model: "mixtral-8x7b-32768",
+      max_tokens: 200,
+      messages: [{ role: "user", content: prompt }],
+    });
 
-    const call = async () => {
-      const response = await groq.messages.create({
-        model: "mixtral-8x7b-32768",
-        max_tokens: 200,
-        messages: [{ role: "user", content: prompt }],
-      });
+    const text =
+      response.content[0].type === "text" ? response.content[0].text : "{}";
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
 
-      const text =
-        response.content?.[0]?.type === "text" ? response.content[0].text : "{}";
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          narrative: parsed.narrative || "Algo sucede en la penumbra...",
-          hpChange: parsed.hpChange || 0,
-          xpChange: parsed.xpChange || 0,
-          itemsGained: parsed.itemsGained || [],
-        };
-      }
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
       return {
-        narrative: "El silencio envuelve tu acción...",
-        hpChange: 0,
-        xpChange: 10,
-        itemsGained: [],
+        narrative: parsed.narrative || "Algo sucede en la penumbra...",
+        hpChange: parsed.hpChange || 0,
+        xpChange: parsed.xpChange || 0,
+        itemsGained: parsed.itemsGained || [],
       };
-    };
-
-    // Timeout guard (10s)
-    const timeoutMs = 10000;
-    const result = await Promise.race([
-      call(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error("GROQ timeout")), timeoutMs)
-      ),
-    ]);
-    return result as any;
+    }
   } catch (error) {
-    console.error("Groq error o timeout:", error);
+    console.error("Groq error:", error);
   }
 
   return {
@@ -216,7 +170,6 @@ Notas: hpChange negativo = daño. xpChange ganado. Sé creativo pero breve.`;
   };
 }
 
-// ===== WEB ROUTES =====
 app.get("/", (c) => {
   return c.html(
     <html>
@@ -266,12 +219,8 @@ app.get("/", (c) => {
             opacity: 0.5;
           }
           @keyframes pulse {
-            0%, 100% {
-              opacity: 0.5;
-            }
-            50% {
-              opacity: 1;
-            }
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
           }
         `}</style>
       </head>
@@ -287,16 +236,13 @@ app.get("/", (c) => {
           </div>
 
           <div class="flex-1 flex gap-3 p-3 max-w-full overflow-hidden">
-            {/* Main Game Area */}
             <div class="flex-1 flex flex-col gap-3 min-w-0">
-              {/* Log */}
               <div class="mud-log rounded p-3 flex-1 overflow-y-auto">
                 <div id="gameLog">
                   <p class="text-yellow-400">[Conectando con el Motor...]</p>
                 </div>
               </div>
 
-              {/* Input */}
               <div class="flex gap-2 flex-shrink-0">
                 <textarea
                   id="commandInput"
@@ -313,9 +259,7 @@ app.get("/", (c) => {
               </div>
             </div>
 
-            {/* Sidebar */}
             <div class="w-72 flex flex-col gap-2 overflow-y-auto flex-shrink-0">
-              {/* Character Card */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h2 class="text-lg font-bold neon-text mb-2">
                   {gameState?.playerName || "---"}
@@ -342,7 +286,6 @@ app.get("/", (c) => {
                 </div>
               </div>
 
-              {/* HP Bar */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <label class="text-gray-500 text-xs block mb-1">Vitalidad</label>
                 <div class="stat-bar mb-1">
@@ -353,7 +296,6 @@ app.get("/", (c) => {
                 </p>
               </div>
 
-              {/* Levels */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <div class="space-y-2 text-xs">
                   <div class="flex justify-between">
@@ -367,7 +309,6 @@ app.get("/", (c) => {
                 </div>
               </div>
 
-              {/* Resources */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">Recursos</h3>
                 <div class="space-y-1 text-xs">
@@ -386,7 +327,6 @@ app.get("/", (c) => {
                 </div>
               </div>
 
-              {/* Factions */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">Facciones</h3>
                 <div id="factionList" class="space-y-1 text-xs">
@@ -401,26 +341,32 @@ app.get("/", (c) => {
                 </div>
               </div>
 
-              {/* Inventory */}
               <div class="bg-gray-900 border border-gray-700 rounded p-3">
                 <h3 class="font-bold mb-2 text-xs">
                   Inventario ({gameState?.inventory.length || 0})
                 </h3>
-                <div id="inventoryList" class="space-y-1 text-xs max-h-40 overflow-y-auto">
+                <div
+                  id="inventoryList"
+                  class="space-y-1 text-xs max-h-40 overflow-y-auto"
+                >
                   {gameState?.inventory.map((item, idx) => (
-                    <div key={idx} class="flex justify-between border-b border-gray-700 pb-1">
+                    <div
+                      key={idx}
+                      class="flex justify-between border-b border-gray-700 pb-1"
+                    >
                       <span>{item.name}</span>
                       <span class="text-cyan-400">{item.rarity}</span>
                     </div>
-                  )) || null}
+                  ))}
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        <script>
-          {`
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
             async function initGame() {
               const name = prompt("¿Cuál es tu nombre, viajero?", "Darian");
               if (!name) return;
@@ -465,37 +411,30 @@ app.get("/", (c) => {
             }
 
             function updateUI(state) {
-              document.getElementById("playerClass").textContent =
-                state.playerClass;
+              document.getElementById("playerClass").textContent = state.playerClass;
               document.getElementById("playerJob").textContent = state.playerJob;
               document.getElementById("location").textContent = state.location;
               document.getElementById("classLvl").textContent = state.classLvl;
               document.getElementById("jobLvl").textContent = state.jobLvl;
               document.getElementById("gold").textContent = state.gold;
               document.getElementById("exp").textContent = state.experience;
-              document.getElementById("baron").textContent =
-                state.factionRep["Barones del Plomo"] || 0;
-              document.getElementById("cult").textContent =
-                state.factionRep["Culto del Óxido"] || 0;
+              document.getElementById("baron").textContent = state.factionRep["Barones del Plomo"] || 0;
+              document.getElementById("cult").textContent = state.factionRep["Culto del Óxido"] || 0;
 
               const hpPercent = (state.hp / state.maxHp) * 100;
-              document.getElementById("hpFill").style.width =
-                Math.min(hpPercent, 100) + "%";
-              document.getElementById("hpText").textContent =
-                state.hp + " / " + state.maxHp;
+              document.getElementById("hpFill").style.width = Math.min(hpPercent, 100) + "%";
+              document.getElementById("hpText").textContent = state.hp + " / " + state.maxHp;
 
-              // FIX: build log HTML correctly
               const log = document.getElementById("gameLog");
-              log.innerHTML = state.log.map((msg) => '<p>' + msg + '</p>').join("");
+              const html = state.log.map(function(msg) {
+                return "<p>" + msg + "</p>";
+              }).join("");
+              log.innerHTML = html;
               log.scrollTop = log.scrollHeight;
             }
 
-            document
-            .getElementById("sendBtn")
-            .addEventListener("click", sendCommand);
-            document
-            .getElementById("commandInput")
-            .addEventListener("keypress", (e) => {
+            document.getElementById("sendBtn").addEventListener("click", sendCommand);
+            document.getElementById("commandInput").addEventListener("keypress", function(e) {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendCommand();
@@ -503,45 +442,27 @@ app.get("/", (c) => {
             });
 
             initGame();
-          `}
-        </script>
+            `,
+          }}
+        />
       </body>
     </html>
   );
 });
 
-// ===== TEMP DIAGNOSTIC ROUTES (REMOVE AFTER DEBUG) =====
-app.get("/_diag", (c) => {
-  return c.json({
-    bun_env_port: (typeof Bun !== "undefined" ? (Bun as any).env?.PORT : undefined),
-    process_env_port: process?.env?.PORT ?? undefined,
-    groq_key_present: Boolean((typeof Bun !== "undefined" ? (Bun as any).env?.GROQ_API_KEY : undefined) ?? process?.env?.GROQ_API_KEY),
-  });
-});
-
-app.get("/ping", (c) => {
-  console.log("PING /ping received");
-  return c.text("pong");
-});
-
-app.get("/api/action", (c) => {
-  return c.text("GET /api/action OK");
-});
-
-// ===== API ENDPOINTS =====
 app.post("/api/init", async (c) => {
   const { name } = await c.req.json();
   gameState = initializeGame(name);
 
   gameState.log.push(
-    "══════════════════════════════════════════════════════════="
+    "═══════════════════════════════════════════════════════════"
   );
   gameState.log.push("🌑 Bienvenido a Aethelraed: Infinity Engine 🌑");
   gameState.log.push(`Tu nombre es: ${name}`);
   gameState.log.push("El mundo está envuelto en óxido y corrupción.");
   gameState.log.push("Escribe tus acciones libremente.");
   gameState.log.push(
-    "══════════════════════════════════════════════════════════="
+    "═══════════════════════════════════════════════════════════"
   );
   gameState.log.push("Despiertas en la Taberna del Óxido...");
 
@@ -550,8 +471,6 @@ app.post("/api/init", async (c) => {
 });
 
 app.post("/api/action", async (c) => {
-  console.log("REQUEST /api/action received - headers:", JSON.stringify(Object.fromEntries(c.req.headers)));
-
   if (!gameState) {
     return c.json({ error: "Game not initialized" }, 400);
   }
@@ -563,20 +482,16 @@ app.post("/api/action", async (c) => {
 
   const { action } = await c.req.json();
 
-  // Interpret action with AI (with timeout inside interpretAction)
   const result = await interpretAction(action, gameState);
 
-  // Log action
   gameState.log.push(`> ${action}`);
   gameState.log.push(`✨ ${result.narrative}`);
 
-  // Apply changes
   gameState.hp = Math.max(0, gameState.hp + result.hpChange);
   gameState.experience += result.xpChange;
   gameState.classXp += Math.floor(result.xpChange * 0.6);
   gameState.jobXp += Math.floor(result.xpChange * 0.4);
 
-  // Check levelups
   if (gameState.classXp >= gameState.classLvl * 100) {
     gameState.classLvl++;
     gameState.classXp = 0;
@@ -595,19 +510,16 @@ app.post("/api/action", async (c) => {
     );
   }
 
-  // Add items
   for (const item of result.itemsGained) {
     gameState.inventory.push(item);
     gameState.log.push(`📦 Obtuviste: ${item.name} (${item.rarity})`);
   }
 
-  // Check death
   if (gameState.hp <= 0) {
     gameState.isAlive = false;
     gameState.log.push("💀 Has caído. Tu legado permanece en el Velo...");
   }
 
-  // Random world events
   if (Math.random() < 0.1) {
     const events = [
       "Una niebla errante desciende sobre la zona...",
@@ -624,45 +536,5 @@ app.post("/api/action", async (c) => {
   return c.json(gameState);
 });
 
-// ===== START SERVER (BUN) =====
-try {
-  if (typeof Bun !== "undefined" && (Bun as any).serve) {
-    (Bun as any).serve({
-      fetch: app.fetch,
-      port: PORT,
-      hostname: HOST,
-      development: false,
-      async onRequest(request, server) {
-        return await app.fetch(request);
-      },
-    });
-    console.log(`Started server: http://${HOST}:${PORT}`);
-  }
-} catch (e: any) {
-  if (e?.code === "EADDRINUSE") {
-    console.warn("Port already in use; assuming the platform started the server. Skipping Bun.serve().");
-  } else {
-    throw e;
-  }
-}
-
-// handle SIGTERM gracefully (best-effort)
-if (typeof process !== "undefined" && process?.on) {
-  process.on("SIGTERM", () => {
-    console.log("SIGTERM recibida, cerrando...");
-    try {
-      // salvo si hay estado
-      if (gameState) saveGame(gameState);
-    } catch (e) {
-      console.error("Error saving on SIGTERM:", e);
-    }
-    // allow the platform to kill the process after cleanup
-    setTimeout(() => {
-      try {
-        process.exit(0);
-      } catch {}
-    }, 1000);
-  });
-}
-
 export default app;
+
