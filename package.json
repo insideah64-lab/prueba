@@ -1,7 +1,7 @@
 {
   "name": "aethelraed-mud",
-  "version": "2.0.0",
-  "description": "Aethelraed: Infinity Engine - MUD con IA por Groq",
+  "version": "3.0.0",
+  "description": "Aethelraed: Infinity Engine - MUD con IA por Groq - PRODUCTION READY",
   "type": "module",
   "scripts": {
     "dev": "bun run --hot index.tsx",
