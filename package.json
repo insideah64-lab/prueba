@@ -1,7 +1,7 @@
 {
   "name": "aethelraed-mud",
-  "version": "3.0.2",
-  "description": "Aethelraed: Infinity Engine - MUD con IA por Groq - FORCE REBUILD 2026-08-27",
+  "version": "3.0.3",
+  "description": "Aethelraed: Infinity Engine - MUD con IA por Groq - FINAL FIX NO JSX",
   "type": "module",
   "scripts": {
     "dev": "bun run --hot start.ts",
